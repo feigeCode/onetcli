@@ -298,10 +298,8 @@ fn set_radius(t: &mut gpui_base::RadiusTokens, n: &str, v: f32) {
 }
 
 fn snapshot_json() -> Rc<String> {
-    let tokens = theme_tokens::current().unwrap_or_default();
-    let appearance =
-        crate::scope::with_current_app(|cx| Theme::global(cx).appearance).unwrap_or_default();
-    SNAPSHOT_CACHE.with(|cache| cache.borrow_mut().snapshot(&tokens, appearance))
+    let theme = theme_tokens::snapshot();
+    SNAPSHOT_CACHE.with(|cache| cache.borrow_mut().snapshot(&theme.tokens, theme.appearance))
 }
 
 fn build_snapshot_json(
