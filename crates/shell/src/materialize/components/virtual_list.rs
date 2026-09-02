@@ -69,8 +69,7 @@ use gpui_base::{VirtualListScrollHandle, h_virtual_list, v_virtual_list};
 use crate::{
     engine::ShellRuntime,
     materialize::{
-        Behavior, Children, StateStyles,
-        components::scrollbar::{SharedScroll, shared_scroll_position},
+        Behavior, Children, StateStyles, components::scrollbar::shared_scroll_position,
         materialize_subtree, warn_ignored_key, warn_unhonoured_a11y,
     },
     spec::{CallbackId, VirtualListSpec},
@@ -88,29 +87,6 @@ use crate::{
 /// of the view from inside GPUI's layout pass, on behalf of a closure that
 /// never reads it — a borrow whose safety the shell would then have to keep
 /// arguing for every time a list ended up nested inside something.
-/// The two things a script can put on any lazy list that it cannot honour.
-///
-/// Shared with [`super::list`], which has the same two: what a list draws is
-/// whatever its item renderer returns, and the list itself has no hit state.
-pub(in crate::materialize) fn warn_lazy_list_misuse(
-    name: &str,
-    children: &Children,
-    states: &StateStyles,
-) {
-    if !children.is_empty() {
-        tracing::warn!(
-            "children are dropped on a {name}: its contents are whatever the item renderer \
-             returns"
-        );
-    }
-    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
-        tracing::warn!(
-            "state styles are ignored on a {name}: it has no interactive state of its own. \
-             Put them on the rows the item renderer returns, or on an element around the list"
-        );
-    }
-}
-
 struct VirtualItems;
 
 impl Render for VirtualItems {
@@ -139,7 +115,18 @@ pub(in crate::materialize) fn virtual_list(
     // `Interactivity` of its own is reachable, so there is no focus handle,
     // role or hit state for any of this to land on.
     warn_unhonoured_a11y(&behavior, name, &[]);
-    warn_lazy_list_misuse(name, &children, &states);
+    if !children.is_empty() {
+        tracing::warn!(
+            "children are dropped on a {name}: its contents are whatever the item renderer \
+             returns, one element per item in the range it is given"
+        );
+    }
+    if states.hover.is_some() || states.active.is_some() || states.focus.is_some() {
+        tracing::warn!(
+            "state styles are ignored on a {name}: it has no interactive state of its own. \
+             Put them on the rows the item renderer returns, or on an element around the list"
+        );
+    }
 
     let identity = ElementId::Name(SharedString::from(spec.id().to_owned()));
     let scroll = scroll_position(runtime, &behavior, &identity, window, cx);
@@ -215,9 +202,8 @@ fn scroll_position(
             .clone()
     });
 
-    shared_scroll_position(identity, window, cx).update(cx, |shared, _| {
-        *shared = SharedScroll::Handle(scroll.base_handle().clone())
-    });
+    shared_scroll_position(identity, window, cx)
+        .update(cx, |shared, _| *shared = scroll.base_handle().clone());
 
     scroll
 }
@@ -226,7 +212,7 @@ fn scroll_position(
 ///
 /// Both halves are timed together because from a frame's point of view they are
 /// one cost, and both are the frame's: see [`crate::metrics`].
-pub(in crate::materialize) fn render_range(
+fn render_range(
     runtime: &Weak<ShellRuntime>,
     get_key: CallbackId,
     render_items: CallbackId,
@@ -280,11 +266,11 @@ pub(in crate::materialize) fn render_range(
 /// list that asked for neither gets its rows exactly as the renderer built
 /// them.
 #[derive(Clone, Copy, Default)]
-pub(in crate::materialize) struct ItemHandlers {
+struct ItemHandlers {
     /// `on_item_click`: the key, on a click.
-    pub(in crate::materialize) click: Option<CallbackId>,
+    click: Option<CallbackId>,
     /// `on_item_secondary_click`: the key and the press, on a right press.
-    pub(in crate::materialize) secondary_click: Option<CallbackId>,
+    secondary_click: Option<CallbackId>,
 }
 
 impl ItemHandlers {
