@@ -64,6 +64,10 @@ struct TextStyleOverride {
 
 pub fn install(ctx: &Ctx<'_>, module: &Object<'_>) -> JsResult<()> {
     ctx.globals().set(
+        "__theme_revision",
+        Func::from(|| -> u32 { theme_tokens::revision() }),
+    )?;
+    ctx.globals().set(
         "__theme_snapshot",
         Func::from(|_: Ctx<'_>| -> JsResult<String> { Ok(snapshot_json()) }),
     )?;
@@ -111,14 +115,16 @@ fn set_theme<'js>(ctx: Ctx<'js>, value: Value<'js>) -> JsResult<()> {
         base.tokens = tokens;
         theme_tokens::sync(cx);
         cx.refresh_windows();
-        Ok(())
+        Ok::<(), rquickjs::Error>(())
     })
     .ok_or_else(|| {
         Exception::throw_type(
             &ctx,
             "set_theme(theme) needs a live host call; call it from an event handler",
         )
-    })?
+    })??;
+    ctx.globals().set("__theme_dirty", true)?;
+    Ok(())
 }
 
 fn apply_colors(

@@ -26,7 +26,7 @@
 //! # Why an import rather than a lookup
 //!
 //! A registered module is resolved by the engine's module loader, so a host
-//! module is imported exactly like `gpui` or `path` is. The obvious alternative
+//! module is imported exactly like `gpui-kit` or `path` is. The obvious alternative
 //! is a lookup — `native("workspace")` answering with a bag of functions — and
 //! it loses twice, both times on *when* a mistake surfaces.
 //!
@@ -609,6 +609,13 @@ impl HostModule {
     }
 
     /// Registers asynchronous work whose underlying operation can be cancelled.
+    ///
+    /// Unlike [`Self::async_function`], the future's owner supplies an action
+    /// that stops the underlying operation when the script's task is cancelled
+    /// — a view that made the call going away, or its application being
+    /// reloaded. This is how a host keeps a slow, expensive operation (a
+    /// network request, a query, a subprocess) from outliving the caller that
+    /// asked for it.
     pub fn cancellable_async_function(
         mut self,
         name: impl Into<String>,
@@ -809,6 +816,7 @@ impl HostModule {
 /// test rather than a name a host can quietly lose.
 pub const RESERVED_SPECIFIERS: &[&str] = &[
     // The runtime's own modules.
+    "gpui-kit",
     "gpui",
     "gpui-base",
     "gpui-component",
@@ -1059,11 +1067,12 @@ impl Drop for CallGuard {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     };
+
+    use super::*;
 
     fn registry() -> HostModules {
         let mut modules = HostModules::new();
@@ -1085,6 +1094,26 @@ mod tests {
     }
 
     #[test]
+    fn cancellable_async_function_exposes_its_cancel_action() {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let cancelled_for_task = Arc::clone(&cancelled);
+        let module = HostModule::new("work").cancellable_async_function("run", move |_| {
+            let cancelled = Arc::clone(&cancelled_for_task);
+            Ok(HostAsyncTask::new(
+                async { Ok(HostValue::Null) },
+                move || cancelled.store(true, Ordering::SeqCst),
+            ))
+        });
+
+        let task = module
+            .begin("run", &HostArguments::default())
+            .expect("build task");
+        task.cancel();
+
+        assert!(cancelled.load(Ordering::SeqCst));
+    }
+
+    #[test]
     fn a_registered_function_is_callable_and_returns_its_value() {
         let modules = registry();
         assert_eq!(
@@ -1103,26 +1132,6 @@ mod tests {
                 .unwrap(),
             HostValue::Number(2.)
         );
-    }
-
-    #[test]
-    fn cancellable_async_function_exposes_its_cancel_action() {
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let cancelled_for_task = Arc::clone(&cancelled);
-        let module = HostModule::new("work").cancellable_async_function("run", move |_| {
-            let cancelled = Arc::clone(&cancelled_for_task);
-            Ok(HostAsyncTask::new(
-                async { Ok(HostValue::Null) },
-                move || cancelled.store(true, Ordering::SeqCst),
-            ))
-        });
-
-        let task = module
-            .begin("run", &HostArguments::default())
-            .expect("build task");
-        task.cancel();
-
-        assert!(cancelled.load(Ordering::SeqCst));
     }
 
     #[test]

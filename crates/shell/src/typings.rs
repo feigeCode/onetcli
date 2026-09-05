@@ -10,21 +10,21 @@
 //!
 //! # One module per crate
 //!
-//! The declarations are three ambient modules, not one: `"gpui"` for GPUI's own
+//! The declarations include `"gpui-kit"` for GPUI's own
 //! elements and what this runtime adds, `"gpui-base"` for gpui-base's layout
 //! helpers, components and theme, and `"gpui-fps"` for its performance overlay.
-//! A name belongs to exactly one of them.
+//! `"gpui"` is a compatibility alias for `"gpui-kit"`.
 //!
 //! That is a contract about provenance rather than a filing convenience. An
 //! import line says which layer a script depends on, so a script that never
 //! reaches for a component says so, and the next layer to arrive —
 //! `gpui-component`, whose components are the reason the seam exists — needs a
 //! list and a `declare module`, not a renaming of everything already here.
-//! Nothing is re-exported for convenience: a name reachable from two specifiers
-//! stops saying where it came from, which is the property being bought.
+//! Apart from the explicit `"gpui"` alias, names are not re-exported for
+//! convenience, preserving the layer named by each import.
 //!
 //! The dependency runs upward only. `"gpui-base"` names what it borrows from
-//! `"gpui"` in an import at the top of its block; `"gpui"` refers down to a
+//! `"gpui-kit"` in an import at the top of its block; `"gpui-kit"` refers down to a
 //! component type only where one shared element prototype forces it — three
 //! builder methods and `cx.theme()` — and does it with an inline
 //! `import("gpui-base").X` rather than a top-level import.
@@ -72,7 +72,7 @@
 //!
 //! Every module the host registered is emitted here too, one `declare module`
 //! per name, so `import { quotes } from "market"` is checked the same way
-//! `import { div } from "gpui"` is. A module that described itself in
+//! `import { div } from "gpui-kit"` is. A module that described itself in
 //! TypeScript through [`crate::HostModule::declarations`] is emitted verbatim;
 //! one that did not gets `(...args: any[]) => any` signatures, which still
 //! check the module name and every export name.
@@ -96,7 +96,7 @@ use crate::value::Bridged;
 
 /// The declaration filename. Fixed because an editor finds the declarations by
 /// having them in the project, not by being told where.
-pub const FILE_NAME: &str = "gpui.d.ts";
+pub const FILE_NAME: &str = "gpui-kit.d.ts";
 
 /// The editor configuration filename, in the spelling a JavaScript project uses.
 pub const CONFIG_FILE_NAME: &str = "jsconfig.json";
@@ -104,7 +104,7 @@ pub const CONFIG_FILE_NAME: &str = "jsconfig.json";
 /// The configuration this one is written beside, and defers to.
 const TYPESCRIPT_CONFIG_FILE_NAME: &str = "tsconfig.json";
 
-/// What an editor has to be told before `gpui.d.ts` and the linked packages
+/// What an editor has to be told before `gpui-kit.d.ts` and the linked packages
 /// mean anything.
 ///
 /// The settings match the ones the applications in this repository were
@@ -128,7 +128,7 @@ const EDITOR_CONFIG: &str = r#"{
     "",
     "`lib` decides which globals exist. The default hands a script the",
     "browser's — a `console`, a `localStorage`, a `Window` this runtime does",
-    "not have — and their declarations collide with the ones gpui.d.ts makes,",
+    "not have — and their declarations collide with the ones gpui-kit.d.ts makes,",
     "so the file describing the API is itself reported as the error.",
     "",
     "`strictNullChecks` is off, and this one is the runtime's shape rather than",
@@ -186,7 +186,7 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
 
     let mut out = String::with_capacity(160 * 1024);
     out.push_str(&PREAMBLE.replace("{version}", crate::plugin::SHELL_VERSION));
-    out.push_str("declare module \"gpui\" {\n");
+    out.push_str("declare module \"gpui-kit\" {\n");
     out.push_str(VALUE_TYPES);
     out.push_str(&color_types());
     out.push_str(&role_type());
@@ -210,6 +210,7 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
     out.push_str(CAPABILITIES);
     out.push_str(SCHEDULING);
     out.push_str("}\n\n");
+    out.push_str("declare module \"gpui\" {\n  export * from \"gpui-kit\";\n}\n\n");
     out.push_str("declare module \"gpui-base\" {\n");
     out.push_str(BASE_IMPORTS);
     out.push_str(&base_color_token_type());
@@ -217,7 +218,7 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
     out.push_str(BASE);
     out.push_str("}\n\n");
     out.push_str("declare module \"gpui-component\" {\n");
-    out.push_str("  import { ClickEvent, Context, Element } from \"gpui\";\n");
+    out.push_str("  import { ClickEvent, Context, Element } from \"gpui-kit\";\n");
     for state in components.states() {
         push_jsdoc(&mut out, state.documentation(), None, "  ");
         out.push_str("  export interface ");
@@ -241,7 +242,7 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
         // is re-declared below with the descriptor's own signature. And a common
         // behavior the descriptor does *not* declare is refused at run time for
         // a registered component — see the `registered_common_behavior` check in
-        // the engine — so leaving it inherited would have `gpui.d.ts` promise a
+        // the engine — so leaving it inherited would have `gpui-kit.d.ts` promise a
         // call that always throws.
         let declared = descriptor
             .methods()
@@ -445,7 +446,7 @@ fn host_modules() -> String {
                 // Rust type of that name carries, so `any` would be wider than
                 // the runtime: a script passing a function or a Symbol would
                 // type-check and then be refused at the call.
-                out.push_str("  import { Element, HostValue } from \"gpui\";\n\n");
+                out.push_str("  import { Element, HostValue } from \"gpui-kit\";\n\n");
                 for function in module.function_names() {
                     // Permissive about shape, but not wrong about the one thing
                     // the caller has to get right: an asynchronous export is
@@ -500,7 +501,7 @@ pub(crate) fn write_application_with_components(
     let mut written = Vec::new();
     let mut first_error = None;
     // The application root only: one project, one configuration, and a nested
-    // directory that happens to import `gpui` is part of it rather than a
+    // directory that happens to import `gpui-kit` is part of it rather than a
     // second project.
     match write_editor_config(root) {
         Ok(Some(path)) => written.push(path),
@@ -593,9 +594,10 @@ fn directories_importing_builtins(root: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// The specifiers one `gpui.d.ts` declares. A script importing any of them
+/// The specifiers one `gpui-kit.d.ts` declares. A script importing any of them
 /// wants the file beside it.
-const BUILTIN_SPECIFIERS: [&str; 5] = [
+const BUILTIN_SPECIFIERS: [&str; 6] = [
+    "gpui-kit",
     "gpui",
     "gpui-base",
     crate::DEFAULT_COMPONENT_MODULE,
@@ -863,7 +865,7 @@ fn doc_comment(documentation: Option<&str>, indent: usize) -> String {
 }
 
 const PREAMBLE: &str = "\
-// Auto-generated — add `gpui.d.ts` to your .gitignore.
+// Auto-generated — add `gpui-kit.d.ts` to your .gitignore.
 //
 // The built-in modules, as TypeScript declarations, for gpui-shell {version}.
 // Do not edit: gpui-shell rewrites this on every run, in every directory that
@@ -871,16 +873,16 @@ const PREAMBLE: &str = "\
 // committed copy could only ever be the stale one.
 //
 // Each built-in module names the public Rust layer it exposes, so an import
-// says which layer a script depends on. \"gpui\" also carries the shell bridge:
+// says which layer a script depends on. \"gpui-kit\" also carries the shell bridge:
 //
-//   \"gpui\"       GPUI's own elements, plus what this runtime adds: views,
+//   \"gpui-kit\"   GPUI's own elements, plus what this runtime adds: views,
 //                the style surface, the window, storage, scheduling.
+//   \"gpui\"       Compatibility alias for \"gpui-kit\".
 //   \"gpui-base\"  gpui-base's layout helpers, components and theme.
 //   \"gpui-fps\"   gpui-fps's performance overlay.
 //
-// A name belongs to exactly one of them. Nothing is re-exported for
-// convenience: a name reachable from two specifiers stops saying where it came
-// from.
+// Except for the explicit \"gpui\" compatibility alias, a name belongs to
+// exactly one module and is not re-exported for convenience.
 //
 // The style surface here is generated from the same tables the runtime
 // dispatches through, so a style method that type-checks exists at run time,
@@ -1483,6 +1485,27 @@ const ELEMENT_METHODS: &str = r#"    /**
      */
     on_item_click(handler: (key: string, cx: Context) => void): Element;
     /**
+     * `handler(key, event, cx)` on a secondary press — the right button — over
+     * a row of a virtual list. `key` is what the list's `get_key(index)`
+     * returned for that row, and `event` is the press as `on_mouse_down`
+     * reports it: `position` in the window, `local_position` and `bounds`
+     * against the row's own box.
+     *
+     * A press rather than a click, because that is when a context menu opens:
+     * the row is still under the pointer, so the menu can name what it is for
+     * before it is drawn over it. And one handler for the list rather than one
+     * per row, for the reason `on_item_click` gives.
+     *
+     * It is delivered on the row, so a handler for the same button on an
+     * element around the list still fires after it, in the ordinary bubble
+     * order, with that element's own `local_position`. A menu drawn inside a
+     * pane learns which row was pressed from this handler and where in the
+     * pane to open from the pane's.
+     */
+    on_item_secondary_click(
+      handler: (key: string, event: MouseButtonEvent, cx: Context) => void,
+    ): Element;
+    /**
      * `handler(value, cx)`, on a toggle. The script owns the new value.
      *
      * A `Radio` only ever reports `true`. It cannot deselect itself, so an
@@ -1791,6 +1814,10 @@ const ELEMENT_METHODS: &str = r#"    /**
      * edge is a preference rather than a promise.
      */
     anchor(value: Anchor): Element;
+    /** Whether an fps_monitor requests continuous whole-window redraws. Default false. */
+    continuous(value: boolean): Element;
+    /** Frame budget, in milliseconds, used by an fps_monitor's FRAME grading. */
+    frame_budget(milliseconds: number): Element;
     /** Which pointer button opens a `Popover`. Default `left`. */
     mouse_button(value: MouseButton): Element;
     /**
@@ -1941,7 +1968,7 @@ const SHELL_TYPES: &str = r#"  /** A path coordinate in pixels or as a percentag
   export type Props = Record<string, any>;
 
   /** Element-local event bounds assembled by the shell. */
-  export interface ElementBounds extends import("gpui").Point {
+  export interface ElementBounds extends import("gpui-kit").Point {
     width: number;
     height: number;
   }
@@ -1961,7 +1988,7 @@ const SHELL_TYPES: &str = r#"  /** A path coordinate in pixels or as a percentag
 
   export interface TaskOptions {
     /** Defaults to the running view; `null` outlives every view. */
-    owner?: import("gpui").View | null;
+    owner?: import("gpui-kit").View | null;
   }
 
   export type MotionProperty = "opacity" | "width" | "height" | "left" | "top";
@@ -2008,6 +2035,76 @@ const ELEMENTS: &str = r#"
    * are supported by the host image loader.
    */
   export function image(path: string): Element;
+
+  /** The visible items, as a half-open `[start, end)` interval. */
+  export interface ItemRange {
+    start: number;
+    end: number;
+  }
+
+  /**
+   * GPUI's own lazy list: rows of any height, measured as they are drawn.
+   *
+   * Where `v_virtual_list` places rows by the sizes the script states, `list`
+   * asks nothing about size. `render(index, cx)` is called for each item that
+   * is drawn, and the list keeps the measurements, so rows of unequal, unstated
+   * height still scroll as one collection.
+   *
+   * The list scrolls itself and paints no scrollbar; pair one with it by name,
+   * as with a scroll area:
+   *
+   * ```js
+   * v_flex().relative().flex_1().min_h(0)
+   *   .child(list("panels", this.panels.length,
+   *     (index) => this.panels[index].id,
+   *     (index) => this.panel(this.panels[index])))
+   *   .child(Scrollbar.vertical("panels").absolute().inset_0());
+   * ```
+   *
+   * The measuring is what it costs: the host is entered once per visible item
+   * per frame, where `v_virtual_list` and `uniform_list` are entered once per
+   * frame however many rows are on screen. Reach for this when heights are
+   * genuinely unequal and unknown — a column of panels, a feed of mixed
+   * cards — and for a long run of same-height rows reach for one of the
+   * others.
+   *
+   * One consequence of the per-item call: `get_key`'s uniqueness is checked
+   * within a call, so a `list` cannot see that two items share a key, where
+   * the other two throw. A duplicate key there quietly gives both items one
+   * identity, and `on_item_click` reports it for either.
+   *
+   * @param id      Identity, and the name a `Scrollbar` pairs with.
+   * @param item_count How many items the collection has, visible or not.
+   * @param get_key An item's stable domain key, from its current index; the
+   *   row's element identity and what `on_item_click` reports.
+   * @param render  Called with one index; returns that item's element.
+   */
+  export function list(
+    id: string | number,
+    item_count: number,
+    get_key: (index: number) => string,
+    render: (index: number, cx: Context) => Element,
+  ): Element;
+
+  /**
+   * GPUI's own uniform list: one row is measured and every row takes its
+   * height.
+   *
+   * The same contract as `v_virtual_list` with a single size, without the
+   * size: the first row (or the one `with_item_to_measure_index` names) is
+   * measured and the rest are placed by it, so a row's height may come from
+   * its content rather than a number in the script. `render(range, cx)` is
+   * called with the visible interval and returns one element per item in it,
+   * so one frame is one call however many rows are on screen — the same
+   * bargain `v_virtual_list` makes, and the reason to prefer this over `list`
+   * whenever the rows really are the same height.
+   */
+  export function uniform_list(
+    id: string | number,
+    item_count: number,
+    get_key: (index: number) => string,
+    render: (range: ItemRange, cx: Context) => Element[],
+  ): Element;
 
   /** Immutable native GPUI geometry produced by `PathBuilder.build()`. */
   export interface Path {}
@@ -3265,7 +3362,7 @@ const BASE: &str = r#"  /** A row. */
    */
   export interface DockArea {
     /** Docks `view` — a view from `cx.new(Class)`, not an element. */
-    add_panel(view: import("gpui").Entity, options: DockPanelOptions): void;
+    add_panel(view: import("gpui-kit").Entity, options: DockPanelOptions): void;
     /** Removes the panel with this id, wherever it sits. */
     remove_panel(id: number): void;
     /** Every panel in the area, in tree order. */
@@ -3324,7 +3421,7 @@ const BASE: &str = r#"  /** A row. */
      * Registering the same name twice replaces the class, which is what a hot
      * reload does.
      */
-    register_panel: (name: string, Class: import("gpui").ViewClass) => string;
+    register_panel: (name: string, Class: import("gpui-kit").ViewClass) => string;
   };
 
   /**
@@ -3454,7 +3551,7 @@ const BASE: &str = r#"  /** A row. */
 
 "#;
 
-/// What `gpui-base`'s declarations borrow from `"gpui"`.
+/// What `gpui-base`'s declarations borrow from `"gpui-kit"`.
 ///
 /// A component is built out of this runtime's vocabulary and returns an
 /// `Element`, so the dependency runs upward only.
@@ -3463,20 +3560,52 @@ const BASE_IMPORTS: &str = r#"  import {
     Context,
     Element,
     FocusHandle,
-  } from "gpui";
+  } from "gpui-kit";
 
 "#;
 
-/// The `gpui-fps` performance overlay: one element, from the crate that draws it.
+/// The `gpui-fps` performance overlay: the element form, and the HUD the
+/// window root draws on a script's behalf.
 const FPS: &str = r#"  /**
    * The native `gpui-fps` performance HUD, shared once per window and pinned
    * to the top-right by default. Its parent must be `relative()`.
+   *
+   * Prefer `show_fps_monitor()`: a HUD placed inside the script's own tree is
+   * rebuilt with it, and what the tree does then counts against the reading.
    */
   export function fps_monitor(): Element;
+
+  /** Where the root-owned HUD sits and how it behaves. Every key is optional. */
+  export interface FpsMonitorOptions {
+    /** Corner or edge of the window. Default `top_right`. */
+    anchor?: Anchor;
+    /**
+     * Whether the HUD requests a redraw after every frame, so the rate it
+     * shows is the rate the window *can* sustain. Default `false`: the HUD
+     * observes the application's own frames and reads zero while it idles.
+     */
+    continuous?: boolean;
+    /** Frame budget in milliseconds, for the FRAME grading and the chart's scale. */
+    frame_budget?: number;
+  }
+
+  /**
+   * Draws the performance HUD over the whole window, above every overlay,
+   * until `hide_fps_monitor()`. The window root owns it: the script says
+   * whether and where, and nothing the script renders can move it, rebuild
+   * it, or count against it. Calling it again moves or reconfigures the HUD
+   * that is already up; the monitor behind it keeps its history across a hide
+   * and a show. Needs a live host call: `init()`, an event handler or a task.
+   */
+  export function show_fps_monitor(options?: FpsMonitorOptions): void;
+  /** Takes the HUD down. `true` if one was up. */
+  export function hide_fps_monitor(): boolean;
+  /** Whether the root-owned HUD is up. */
+  export function fps_monitor_visible(): boolean;
 "#;
 
-/// What `gpui-fps`'s one declaration borrows from `"gpui"`.
-const FPS_IMPORTS: &str = r#"  import { Element } from "gpui";
+/// What `gpui-fps`'s declarations borrow from `"gpui-kit"`.
+const FPS_IMPORTS: &str = r#"  import { Anchor, Element } from "gpui-kit";
 
 "#;
 
@@ -3678,7 +3807,7 @@ const WINDOW_GLOBAL: &str = r#"
  * `cx.notify()` re-renders this view, `window.open_dialog()` changes what the
  * user is looking at — which is why these are here and not on `Context`.
  */
-type GpuiShellWindow = import("gpui").Window;
+type GpuiShellWindow = import("gpui-kit").Window;
 interface Window extends GpuiShellWindow {}
 declare var window: Window & typeof globalThis;
 
@@ -3687,9 +3816,9 @@ declare var window: Window & typeof globalThis;
  * *is* the global object. Here `window` is an ordinary object, so both
  * spellings are installed rather than one falling out of the other.
  */
-declare const localStorage: import("gpui").Storage;
+declare const localStorage: import("gpui-kit").Storage;
 /** `window.sessionStorage`, bare, for the same reason. */
-declare const sessionStorage: import("gpui").Storage;
+declare const sessionStorage: import("gpui-kit").Storage;
 "#;
 
 const SCHEDULING: &str = r#"
@@ -3779,6 +3908,7 @@ mod tests {
         "aria_level",
         "keep_mounted",
         "on_item_click",
+        "on_item_secondary_click",
         "on_change",
         "on_step",
         "on_open_change",
@@ -3842,6 +3972,8 @@ mod tests {
         "default_open",
         "overlay_closable",
         "anchor",
+        "continuous",
+        "frame_budget",
         "mouse_button",
         "open_delay",
         "close_delay",
@@ -3997,7 +4129,7 @@ mod tests {
                     .expect("unterminated module");
             &declarations[start..end]
         };
-        let gpui = module("gpui");
+        let gpui = module("gpui-kit");
         let base = module("gpui-base");
         let shell = module("gpui-shell");
 
@@ -4075,7 +4207,10 @@ mod tests {
         for method in element_methods(&declarations) {
             assert!(!method.is_empty(), "a method line has no name");
         }
-        assert!(declarations.contains("declare module \"gpui\" {"));
+        assert!(declarations.contains("declare module \"gpui-kit\" {"));
+        assert!(
+            declarations.contains("declare module \"gpui\" {\n  export * from \"gpui-kit\";\n}")
+        );
         // The global declaration follows the module blocks, and has to stay
         // outside it: a `declare module` body cannot introduce a global, and
         // this file is only in script mode because it has no top-level import
@@ -4139,7 +4274,7 @@ mod tests {
         // `HostValue` rather than `any`: the boundary is not wider than the
         // Rust type of that name, and the declarations should not claim it is.
         assert!(
-            declarations.contains("  import { Element, HostValue } from \"gpui\";"),
+            declarations.contains("  import { Element, HostValue } from \"gpui-kit\";"),
             "the permissive signatures below need this import to resolve"
         );
         assert!(
@@ -4176,9 +4311,9 @@ mod tests {
 
         // A component is declared where it is implemented. Reading a name out
         // of the wrong module is the failure this guards: `Button` under
-        // `"gpui"` would say the runtime draws it, and the whole point of the
+        // `"gpui-kit"` would say the runtime draws it, and the whole point of the
         // split is that `gpui-base` does.
-        let gpui = module("gpui");
+        let gpui = module("gpui-kit");
         let base = module("gpui-base");
         for name in [
             "export const Button",
@@ -4198,8 +4333,8 @@ mod tests {
         assert!(module("gpui-fps").contains("export function fps_monitor(): Element;"));
 
         // The dependency runs upward only: a layer names what it borrows from
-        // `"gpui"`, and `"gpui"` imports nothing back.
-        assert!(base.contains("} from \"gpui\";"));
+        // `"gpui-kit"`, and `"gpui-kit"` imports nothing back.
+        assert!(base.contains("} from \"gpui-kit\";"));
         assert!(!gpui.contains("} from \"gpui-base\";"));
     }
 
@@ -4217,7 +4352,7 @@ mod tests {
 
         let declarations = base_declarations();
         for (specifier, names) in [
-            ("gpui", exports::GPUI),
+            ("gpui-kit", exports::GPUI),
             ("gpui-base", exports::GPUI_BASE),
             ("gpui-shell", exports::GPUI_SHELL),
             ("gpui-fps", exports::GPUI_FPS),
@@ -4768,8 +4903,11 @@ mod tests {
         let _ = std::fs::remove_dir_all(&outside);
         std::fs::create_dir_all(&root).expect("application root");
         std::fs::create_dir_all(&outside).expect("outside directory");
-        std::fs::write(outside.join("escape.js"), "import { View } from 'gpui';")
-            .expect("outside script");
+        std::fs::write(
+            outside.join("escape.js"),
+            "import { View } from 'gpui-kit';",
+        )
+        .expect("outside script");
         symlink(&outside, root.join("escape")).expect("directory symlink");
 
         write_application_with_components(&root, &crate::FrozenComponentRegistry::default())
