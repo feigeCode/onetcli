@@ -1023,6 +1023,9 @@ pub(crate) mod exports {
         "div",
         "svg",
         "image",
+        // GPUI's own lazy lists.
+        "list",
+        "uniform_list",
         "PathBuilder",
         "Background",
     ];
@@ -1968,8 +1971,17 @@ impl ShellRuntime {
     /// its own files and the built-in modules, and nothing else. That is
     /// the first half of the sandbox's module policy (design doc §19.1).
     pub(crate) fn load_app(self: &Rc<Self>, dir: &Path, entry: &str) -> Result<ViewType> {
+        self.load_app_with_options(dir, entry, true)
+    }
+
+    pub(crate) fn load_app_with_options(
+        self: &Rc<Self>,
+        dir: &Path,
+        entry: &str,
+        write_type_declarations: bool,
+    ) -> Result<ViewType> {
         let root = crate::runtime::resolve_app_root(dir, entry)?;
-        if let Err(error) = self.write_type_declarations(&root) {
+        if write_type_declarations && let Err(error) = self.write_type_declarations(&root) {
             tracing::debug!(
                 "could not update declarations in {}: {error}",
                 root.display()
@@ -3640,7 +3652,10 @@ impl ShellRuntime {
                     payload.set("secondary", *secondary)?;
                     payload.set("shift", *shift)?;
                 }
-                InputEvent::Change | InputEvent::Focus | InputEvent::Blur => {}
+                InputEvent::Change
+                | InputEvent::Focus
+                | InputEvent::Blur
+                | InputEvent::GutterMarkerMouseDown { .. } => {}
             }
             handler.call::<_, ()>((
                 payload,
@@ -5354,6 +5369,28 @@ globalThis.__gpui = (() => {
     return element(build(String(id), item_count, item_sizes, get_key, render));
   };
 
+  // `list` and `uniform_list`: GPUI's own lazy lists.
+  const lazyList = (build, name, perItem) => (id, item_count, get_key, render) => {
+    const shape = name + "(id, item_count, get_key, render)";
+    checkListArgs(
+      shape,
+      item_count,
+      get_key,
+      render,
+      perItem ? "once per item on screen, with the item's index" : RANGE_HINT,
+    );
+    const describe = perItem
+      ? (range, cx) => {
+          const items = [];
+          for (let index = range.start; index < range.end; index++) {
+            items.push(render(index, cx));
+          }
+          return items;
+        }
+      : render;
+    return element(build(String(id), item_count, get_key, describe));
+  };
+
   const finiteNonNegative = (value, name) => {
     if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
       throw new TypeError(name + " must be a finite non-negative number");
@@ -6551,6 +6588,8 @@ globalThis.__gpui = (() => {
     // would put one number per row across the boundary on every render.
     v_virtual_list: virtualList(__v_virtual_list, "v_virtual_list"),
     h_virtual_list: virtualList(__h_virtual_list, "h_virtual_list"),
+    list: lazyList(__list, "list", true),
+    uniform_list: lazyList(__uniform_list, "uniform_list", false),
     VirtualListScrollHandle: { new: () => virtualScrollHandle(__virtual_scroll_new()) },
     Scrollbar: {
       new: (id) => element(__scrollbar(String(id))),
@@ -7058,6 +7097,18 @@ impl ShellRuntime {
                 "__h_virtual_list",
                 runtime.clone(),
                 gpui::Axis::Horizontal,
+            )?;
+            list_constructor(
+                &globals,
+                "__list",
+                runtime.clone(),
+                crate::spec::ListKind::Measured,
+            )?;
+            list_constructor(
+                &globals,
+                "__uniform_list",
+                runtime.clone(),
+                crate::spec::ListKind::Uniform,
             )?;
             text_constructor(&globals, "__popup", runtime.clone(), Component::Popup)?;
             text_constructor(&globals, "__select", runtime.clone(), Component::Select)?;
@@ -8473,6 +8524,59 @@ const MAX_VIRTUAL_ITEMS_PER_RENDER: usize = 1_000_000;
 /// be registered from inside another item renderer: by then the generation that
 /// would own it has been committed, and a callback pushed with no open
 /// generation is one no lookup can ever match.
+fn list_constructor(
+    globals: &Object<'_>,
+    name: &str,
+    runtime: Weak<ShellRuntime>,
+    kind: crate::spec::ListKind,
+) -> JsResult<()> {
+    globals.set(
+        name,
+        Func::from(
+            move |ctx: Ctx<'_>,
+                  id: String,
+                  count: usize,
+                  get_key: ItemKeyResolver,
+                  render: ItemRenderer|
+                  -> JsResult<SpecId> {
+                if scope::current_phase() == Some(ScopePhase::Layout) {
+                    return Err(Exception::throw_type(
+                        &ctx,
+                        "a list cannot be built from inside another list's item renderer",
+                    ));
+                }
+                let store = upgrade(&runtime, &ctx)?;
+                if !store
+                    .arena
+                    .borrow_mut()
+                    .claim_virtual_items(count, MAX_VIRTUAL_ITEMS_PER_RENDER)
+                {
+                    return Err(Exception::throw_type(
+                        &ctx,
+                        &format!(
+                            "the lists in one render may describe at most \
+                             {MAX_VIRTUAL_ITEMS_PER_RENDER} items in total"
+                        ),
+                    ));
+                }
+                let entry = |value| {
+                    store.callbacks.borrow_mut().push(CallbackEntry {
+                        value,
+                        view: scope::current_view().map(|view| view.downgrade()),
+                        application: scope::current_application_generation(),
+                        registered_in: scope::current_generation(),
+                    })
+                };
+                let get_key = entry(get_key.0);
+                let callback = entry(render.0);
+                Ok(store.push_node(Component::List(Rc::new(crate::spec::ListSpec::new(
+                    id, kind, count, get_key, callback,
+                )))))
+            },
+        ),
+    )
+}
+
 fn virtual_list_constructor(
     globals: &Object<'_>,
     name: &str,

@@ -11,12 +11,26 @@ use crate::scope::with_current_app;
 
 thread_local! {
     static CACHED: RefCell<Option<SemanticThemeTokens>> = const { RefCell::new(None) };
+    static REVISION: RefCell<u32> = const { RefCell::new(0) };
 }
 
 pub(crate) fn sync(cx: &App) -> SemanticThemeTokens {
     let tokens = Theme::global(cx).tokens;
-    CACHED.with(|cached| *cached.borrow_mut() = Some(tokens.clone()));
+    CACHED.with(|cached| {
+        let changed = cached.borrow().as_ref() != Some(&tokens);
+        *cached.borrow_mut() = Some(tokens.clone());
+        if changed {
+            REVISION.with(|revision| {
+                let next = revision.borrow().wrapping_add(1);
+                *revision.borrow_mut() = next;
+            });
+        }
+    });
     tokens
+}
+
+pub(crate) fn revision() -> u32 {
+    REVISION.with(|revision| *revision.borrow())
 }
 
 /// Lends the active palette to `read`, from the same two places in the same
