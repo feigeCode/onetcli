@@ -3,15 +3,16 @@ use std::time::Duration;
 use web_time::Instant;
 
 use gpui::{
-    App, Bounds, ColorExt as _, Context, DisplayId, Div, Hsla, InteractiveElement as _, IntoElement,
-    MouseButton, ParentElement, PathBuilder, Pixels, Point, Render, StatefulInteractiveElement as _,
-    Styled, Window, canvas, div, point, prelude::FluentBuilder as _, px, relative,
+    App, Bounds, Context, DisplayId, Div, Hsla, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement, PathBuilder, Pixels, Point, Render, StatefulInteractiveElement as _, Styled,
+    Window, canvas, div, point, prelude::FluentBuilder as _, px, relative,
 };
 
 use gpui::Task;
 
 use crate::{
     FrameTraceGuard,
+    refresh::display_refresh_rate,
     sampler::{FrameSampler, ResourceSample, minimum_resource_interval},
     style::FpsStyle,
 };
@@ -73,11 +74,6 @@ const UNIT_WIDTH: Pixels = px(28.);
 /// fast enough to feel live.
 const READOUT_INTERVAL: Duration = Duration::from_millis(500);
 
-/// Fraction of the target frame rate that still counts as meeting it. Vsync and
-/// the sampling window each cost a frame or so a second, so a 60Hz display that
-/// is keeping up perfectly reports 58 to 60, never a flat 60.
-const FPS_TOLERANCE: f32 = 0.95;
-
 /// A monospace family that ships with the platform, so the value column stays
 /// aligned without the application having to configure a font. The generic
 /// `monospace` alias is not resolvable by every platform's font backend, hence
@@ -126,9 +122,9 @@ struct Readout {
     /// resource row right underneath. The frame cost answers the same question
     /// without being paid for.
     ///
-    /// Held to the display's refresh rate once that is known. A frame drawn in
-    /// 3ms is not 333 frames the reader could ever see, and printing it that
-    /// way turns the headline back into a benchmark score rather than a rate.
+    /// A ceiling the frame cost can prove, not one the display can show: a
+    /// window whose frames cost 3ms could redraw 333 times a second, on a
+    /// panel that would scan out sixty of them.
     max_fps: f32,
     /// Frames presented per second: the rate the window is actually drawing
     /// at, which an idle application drives to zero. The reciprocal of
@@ -147,24 +143,23 @@ struct Readout {
 }
 
 /// The rate a full redraw could sustain: what a frame's cost implies, held to
-/// what the display can present.
+/// what the panel can scan out.
 ///
 /// The cap is the half the derivation loses. Counting presents could never
 /// exceed the refresh rate — frames go to the compositor on vsync, so the
-/// bound came for free — and a figure derived from frame cost has no such
-/// ceiling: a frame drawn in 3ms reads as 333, a number nobody could ever
-/// see. `display` is `None` until the window has presented two frames a
-/// plausible refresh apart, and an uncapped reading is better than one capped
-/// by a guess.
-fn sustainable_rate(mean_draw: Duration, display: Option<f32>) -> f32 {
+/// bound came for free — while a frame drawn in 3ms reads as 333, a rate
+/// nobody could ever see. `display` is `None` where the platform would not say
+/// what the panel runs at, and an uncapped reading is better than one held to
+/// a guess: see [`crate::refresh`] for why guessing was tried and abandoned.
+fn sustainable_rate(mean_draw: Duration, display: Option<Duration>) -> f32 {
     let mean_draw = mean_draw.as_secs_f32();
     if mean_draw <= 0. {
         return 0.;
     }
     let rate = 1. / mean_draw;
-    match display {
-        Some(display) => rate.min(display),
-        None => rate,
+    match display.map(|period| period.as_secs_f32()) {
+        Some(period) if period > 0. => rate.min(1. / period),
+        _ => rate,
     }
 }
 
@@ -189,6 +184,10 @@ pub struct FpsMonitor {
     style: FpsStyle,
     frame_budget: Duration,
     headline: Headline,
+    /// The panel's refresh period, and which display it was asked about, so
+    /// that moving the window to another monitor re-asks and staying on one
+    /// does not ask again every frame.
+    display: Option<(DisplayId, Option<Duration>)>,
     show_resources: bool,
     resource_interval: Duration,
     resources: Option<ResourceSample>,
@@ -209,6 +208,7 @@ impl FpsMonitor {
             style: FpsStyle::default(),
             frame_budget,
             headline: Headline::Max,
+            display: None,
             show_resources: true,
             resource_interval: DEFAULT_RESOURCE_INTERVAL,
             resources: None,
@@ -341,6 +341,19 @@ impl FpsMonitor {
         }));
     }
 
+    /// Re-asks the platform for the refresh rate when the window has moved to
+    /// another display, and not otherwise: the answer is a property of the
+    /// panel, and on some platforms asking is a round trip.
+    fn update_display(&mut self, window: &Window, cx: &App) {
+        let Some(display) = window.display(cx) else {
+            return;
+        };
+        let id = display.id();
+        if self.display.map(|(asked, _)| asked) != Some(id) {
+            self.display = Some((id, display_refresh_rate(display.as_ref())));
+        }
+    }
+
     /// Republishes the readings if [`READOUT_INTERVAL`] has passed.
     fn update_readout(&mut self) {
         let now = Instant::now();
@@ -352,8 +365,12 @@ impl FpsMonitor {
         }
 
         self.readout = Readout {
-            max_fps: sustainable_rate(self.sampler.mean_draw(), self.sampler.peak_present_rate()),
+            max_fps: sustainable_rate(
+                self.sampler.mean_draw(),
+                self.display.and_then(|(_, refresh_rate)| refresh_rate),
+            ),
             fps: self.sampler.fps(),
+            interval_millis: self.sampler.present_interval().as_secs_f32() * 1000.,
             // The mean over the interval rather than the latest frame, which
             // at this cadence would be an arbitrary sample.
             frame_millis: self.sampler.mean_draw().as_secs_f32() * 1000.,
@@ -501,8 +518,9 @@ impl FpsMonitor {
 }
 
 impl Render for FpsMonitor {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sampler.tick();
+        self.update_display(window, cx);
         self.update_readout();
         self.update_axis();
         self.start_clock(cx);
@@ -512,6 +530,7 @@ impl Render for FpsMonitor {
         let Readout {
             max_fps,
             fps,
+            interval_millis,
             frame_millis,
             percentile_millis,
             dropped_percent: dropped,
@@ -593,11 +612,11 @@ impl Render for FpsMonitor {
                         .child(reading(
                             "FRAME",
                             format!("{frame_millis:.1} ms"),
-                            // Graded against the budget, not against the frame
-                            // rate. An idle window draws a handful of frames a
-                            // second, so the headline goes red while every one
-                            // of those frames was in fact drawn well inside the
-                            // budget; this row is what says so.
+                            // Graded against the budget, and the first reading
+                            // in the HUD that is: the rate above says how often
+                            // frames happened, this says whether they were
+                            // affordable. It is the one to read when something
+                            // feels slow.
                             style.level_color(frame_millis / 1000., budget.as_secs_f32()),
                             style,
                         ))
@@ -678,29 +697,6 @@ impl Render for FpsMonitor {
     }
 }
 
-/// Grades the frame rate against the rate the budget implies.
-///
-/// This deliberately does not compare `1/fps` against the budget the way the
-/// per-frame trace does. Under vsync the measured rate lands just under the
-/// refresh rate essentially always — a 60Hz display reads 58 to 60, never
-/// exactly 60.00 — so an exact comparison would paint a perfectly healthy
-/// application as over budget. Anything within [`FPS_TOLERANCE`] of the target
-/// counts as meeting it.
-fn fps_color(fps: f32, budget: Duration, style: FpsStyle) -> Hsla {
-    if fps <= 0. {
-        return style.muted;
-    }
-
-    let target = 1. / budget.as_secs_f32();
-    if fps >= target * FPS_TOLERANCE {
-        style.good
-    } else if fps >= target * 0.5 {
-        style.warn
-    } else {
-        style.bad
-    }
-}
-
 /// A row carrying two [`pair`]s, pushed to either inner edge.
 fn row() -> Div {
     div().flex().w_full().justify_between().gap_2().py(px(1.))
@@ -765,19 +761,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_headline_rate_never_exceeds_what_the_display_can_present() {
+    fn the_headline_rate_is_what_a_frame_costs_and_the_panel_allows() {
+        let sixty = Duration::from_micros(16_667);
         // A cheap frame on a 60Hz panel is not 333 frames anyone could see.
-        assert_eq!(
-            sustainable_rate(Duration::from_millis(3), Some(60.)),
-            60.,
-            "a frame cheaper than a refresh is capped by the refresh"
-        );
-        // Until the display has shown its cadence, capping would be a guess.
-        assert!((sustainable_rate(Duration::from_millis(3), None) - 333.33).abs() < 0.1);
+        assert!((sustainable_rate(Duration::from_millis(3), Some(sixty)) - 60.).abs() < 0.01);
         // A frame that costs more than a refresh sets the rate itself.
-        assert_eq!(sustainable_rate(Duration::from_millis(20), Some(60.)), 50.);
+        assert_eq!(
+            sustainable_rate(Duration::from_millis(20), Some(sixty)),
+            50.
+        );
+        // Where the platform will not say, an uncapped reading beats a guess.
+        assert!((sustainable_rate(Duration::from_millis(3), None) - 333.33).abs() < 0.1);
         // No frames drawn yet is no rate, not an infinite one.
-        assert_eq!(sustainable_rate(Duration::ZERO, Some(60.)), 0.);
+        assert_eq!(sustainable_rate(Duration::ZERO, Some(sixty)), 0.);
     }
 
     #[gpui::test]
@@ -802,25 +798,6 @@ mod tests {
             // the chart scaled for 60Hz frames.
             assert_eq!(monitor.axis_max, budget.as_secs_f32() * 2.);
         });
-    }
-
-    #[test]
-    fn a_display_keeping_up_is_never_graded_as_falling_behind() {
-        let style = FpsStyle::dark();
-        let budget = DEFAULT_FRAME_BUDGET;
-
-        // What a healthy 60Hz display actually reports.
-        for rate in [58., 59., 59.7, 60., 61.] {
-            assert_eq!(
-                fps_color(rate, budget, style),
-                style.good,
-                "{rate} fps should read as healthy on a 60Hz display"
-            );
-        }
-
-        assert_eq!(fps_color(45., budget, style), style.warn);
-        assert_eq!(fps_color(20., budget, style), style.bad);
-        assert_eq!(fps_color(0., budget, style), style.muted);
     }
 
     #[test]
