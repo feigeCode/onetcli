@@ -11,6 +11,7 @@ members = [
   "crates/fps",
   "crates/webview",
   "examples/app_assets",
+  "examples/gen-navop-typings",
   "examples/fps_monitor",
   "examples/hello_world",
   "examples/input",
