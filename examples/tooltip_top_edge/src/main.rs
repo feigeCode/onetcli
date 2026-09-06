@@ -1,5 +1,5 @@
 use gpui::*;
-use gpui_component::{ActiveTheme as _, Root, button::*};
+use gpui_component::{ActiveTheme as _, Placement, Root, button::*};
 
 struct TooltipTopEdgeExample;
 
@@ -15,7 +15,8 @@ impl Render for TooltipTopEdgeExample {
                     Button::new("top-edge-tooltip")
                         .primary()
                         .label("Hover for tooltip")
-                        .tooltip("This tooltip should appear below the trigger near the top edge."),
+                        .tooltip("This tooltip should appear below the trigger near the top edge.")
+                        .tooltip_placement(Placement::Top),
                 ),
             )
             .child(
