@@ -13,6 +13,12 @@ decorations, highlighting, search infrastructure, diagnostics, and LSP hooks.
 Use [Input](./input.md) for single-line values and
 [Textarea](./textarea.md) for ordinary multi-line text.
 
+## Keyboard shortcuts
+
+The base and styled editors share keyboard and mouse behavior. See
+[Keyboard shortcuts and column selection](../../docs/components/editor.md#keyboard-shortcuts-and-column-selection)
+for the macOS, Linux, and Windows bindings, multi-cursor editing, and column-selection details.
+
 ## Import
 
 ```rust
