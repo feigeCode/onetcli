@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use gpui::{
-    Action, App, AppContext, ClickEvent, Context, Entity, Focusable, Hsla, InteractiveElement,
-    IntoElement, ParentElement, Render, SharedString, Styled, Window, div, prelude::FluentBuilder,
-    px, relative,
+    Action, App, AppContext, ClickEvent, Context, Entity, Focusable, InteractiveElement,
+    IntoElement, ParentElement, Render, SharedString, StyleRefinement, Styled, Window, div,
+    prelude::FluentBuilder, px, relative,
 };
 
 use gpui_component::{
@@ -555,7 +555,7 @@ impl Render for SidebarStory {
                                     .default_open(ix == 0)
                                     .click_to_open(self.click_to_open_submenu)
                                     .when(is_active, |this| {
-                                        this.border_1().border_color(Hsla::white())
+                                        this.border_1().border_color(gpui_component::white())
                                     })
                                     .when(ix == 0, |this| {
                                         this.context_menu({

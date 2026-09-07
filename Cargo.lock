@@ -3540,11 +3540,14 @@ dependencies = [
 name = "gpui_ce_components_fps"
 version = "0.2.0"
 dependencies = [
+ "core-graphics 0.24.0",
  "gpui-ce",
  "libc",
  "objc2-core-foundation",
  "objc2-io-kit",
  "sysinfo 0.37.2",
+ "uuid",
+ "wayland-client",
  "web-time",
  "windows 0.58.0",
 ]

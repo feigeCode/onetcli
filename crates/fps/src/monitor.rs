@@ -3,9 +3,9 @@ use std::time::Duration;
 use web_time::Instant;
 
 use gpui::{
-    App, Bounds, Context, DisplayId, Div, Hsla, InteractiveElement as _, IntoElement, MouseButton,
-    ParentElement, PathBuilder, Pixels, Point, Render, StatefulInteractiveElement as _, Styled,
-    Window, canvas, div, point, prelude::FluentBuilder as _, px, relative,
+    App, Bounds, ColorExt as _, Context, DisplayId, Div, Hsla, InteractiveElement as _, IntoElement,
+    MouseButton, ParentElement, PathBuilder, Pixels, Point, Render, StatefulInteractiveElement as _,
+    Styled, Window, canvas, div, point, prelude::FluentBuilder as _, px, relative,
 };
 
 use gpui::Task;

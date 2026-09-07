@@ -6,6 +6,7 @@ use gpui::{
 };
 use gpui_component_macros::icon_named;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Absolute visual sizes for icons, independent from their surrounding text.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -126,11 +127,20 @@ impl RenderOnce for IconName {
     }
 }
 
+/// Where an [`Icon`]'s SVG content comes from.
+#[derive(Clone)]
+pub(crate) enum IconSource {
+    /// An embedded asset path, resolved through the assets crate.
+    Path(SharedString),
+    /// Raw SVG bytes supplied directly, without an asset lookup.
+    Data(Arc<[u8]>),
+}
+
 #[derive(IntoElement)]
 pub struct Icon {
     base: Svg,
     style: StyleRefinement,
-    path: SharedString,
+    source: IconSource,
     image_source: Option<ImageSource>,
     text_color: Option<Hsla>,
     size: Option<Size>,
@@ -143,7 +153,7 @@ impl Default for Icon {
         Self {
             base: svg().flex_none().size_4(),
             style: StyleRefinement::default(),
-            path: "".into(),
+            source: IconSource::Path("".into()),
             image_source: None,
             text_color: None,
             size: None,
@@ -155,7 +165,8 @@ impl Default for Icon {
 
 impl Clone for Icon {
     fn clone(&self) -> Self {
-        let mut this = Self::default().path(self.path.clone());
+        let mut this = Self::default().path(self.source_path());
+        this.source = self.source.clone();
         this.style = self.style.clone();
         this.rotation = self.rotation;
         this.size = self.size;
@@ -180,7 +191,7 @@ impl Icon {
     ///
     /// For example: `icons/foo.svg`
     pub fn path(mut self, path: impl Into<SharedString>) -> Self {
-        self.path = path.into();
+        self.source = IconSource::Path(path.into());
         self.image_source = None;
         self
     }
@@ -188,14 +199,24 @@ impl Icon {
     /// Use an image from the filesystem rather than the embedded asset bundle.
     pub fn file_path(mut self, path: impl Into<PathBuf>) -> Self {
         let path = path.into();
-        self.path = path.display().to_string().into();
+        self.source = IconSource::Path(path.display().to_string().into());
         self.image_source = Some(path.into());
         self
     }
 
+    /// Set raw SVG bytes without registering an asset path.
+    ///
+    /// Copies the bytes into shared storage; the input need not be static.
+    /// Cloning the icon shares those bytes. Replaces any previously set path or data.
+    pub fn data(mut self, data: &[u8]) -> Self {
+        self.source = IconSource::Data(Arc::from(data));
+        self.image_source = None;
+        self
+    }
+
     #[cfg(any(target_os = "macos", target_os = "windows", test))]
-    pub(crate) fn path_ref(&self) -> &SharedString {
-        &self.path
+    pub(crate) fn source_ref(&self) -> &IconSource {
+        &self.source
     }
 
     /// Create a new view for the icon
@@ -233,6 +254,22 @@ impl Icon {
             .base
             .with_transformation(Transformation::rotate(radians));
         self
+    }
+
+    /// Point `svg` at whichever source is set: an embedded asset path or raw bytes.
+    fn apply_source(self, svg: Svg) -> Svg {
+        match &self.source {
+            IconSource::Path(path) => svg.path(path.clone()),
+            IconSource::Data(bytes) => svg.data(bytes),
+        }
+    }
+
+    /// The path a [`IconSource::Path`] icon loads from.
+    fn source_path(&self) -> SharedString {
+        match &self.source {
+            IconSource::Path(path) => path.clone(),
+            IconSource::Data(_) => SharedString::default(),
+        }
     }
 }
 
@@ -420,7 +457,7 @@ impl RenderOnce for Icon {
                     .text_color(text_color)
                     .when(!has_base_size, |this| this.size(text_size))
                     .when_some(self.size, apply_icon_size)
-                    .path(self.path)
+                    .map(|this| svg_with_source(&self.source, this))
                     .into_any_element()
             }
             IconColorMode::Color => {
@@ -430,10 +467,27 @@ impl RenderOnce for Icon {
                 base.flex_shrink_0()
                     .when(!has_base_size, |this| this.size(text_size))
                     .when_some(self.size, apply_icon_size)
-                    .child(img(self.image_source.unwrap_or_else(|| self.path.into())).size_full())
+                    .child(icon_content(&self.source, self.image_source))
                     .into_any_element()
             }
         }
+    }
+}
+
+fn svg_with_source(source: &IconSource, svg: Svg) -> Svg {
+    match source {
+        IconSource::Path(path) => svg.path(path.clone()),
+        IconSource::Data(bytes) => svg.data(bytes),
+    }
+}
+
+/// The element that paints an icon's SVG content.
+fn icon_content(source: &IconSource, image_source: Option<ImageSource>) -> AnyElement {
+    match source {
+        IconSource::Path(path) => img(image_source.unwrap_or_else(|| path.clone().into()))
+            .size_full()
+            .into_any_element(),
+        IconSource::Data(bytes) => svg().data(bytes).size_full().into_any_element(),
     }
 }
 
@@ -458,7 +512,7 @@ impl Render for Icon {
                     .text_color(text_color)
                     .when(!has_base_size, |this| this.size(text_size))
                     .when_some(self.size, apply_icon_size)
-                    .path(self.path.clone())
+                    .map(|this| svg_with_source(&self.source, this))
                     .when_some(self.rotation, |this, rotation| {
                         this.with_transformation(Transformation::rotate(rotation))
                     })
@@ -471,13 +525,7 @@ impl Render for Icon {
                 base.flex_shrink_0()
                     .when(!has_base_size, |this| this.size(text_size))
                     .when_some(self.size, apply_icon_size)
-                    .child(
-                        img(self
-                            .image_source
-                            .clone()
-                            .unwrap_or_else(|| self.path.clone().into()))
-                        .size_full(),
-                    )
+                    .child(icon_content(&self.source, self.image_source.clone()))
                     .into_any_element()
             }
         }

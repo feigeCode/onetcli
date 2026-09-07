@@ -86,7 +86,7 @@ impl Render for IconStory {
                     .description(
                         "Embedded icons share the same sizing, colors, and loading behavior.",
                     )
-                    .w(gpui_kit::rems(30.))
+                    .w(gpui::rems(30.))
                     .child(
                         v_flex()
                             .gap_3()
@@ -136,7 +136,7 @@ impl Render for IconStory {
                                     ),
                             )
                             .child(
-                                gpui_kit::div()
+                                gpui::div()
                                     .text_sm()
                                     .text_color(cx.theme().muted_foreground)
                                     .child(self.message),
@@ -146,7 +146,7 @@ impl Render for IconStory {
             .child(
                 section("Cloning and views")
                     .description("Both arrows retain their SVG bytes and 90° rotation.")
-                    .w(gpui_kit::rems(30.))
+                    .w(gpui::rems(30.))
                     .child(h_flex().gap_4().child("Clone").child(self.arrow.clone()))
                     .child(
                         h_flex()
