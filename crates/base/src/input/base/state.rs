@@ -219,6 +219,14 @@ pub(crate) fn init(cx: &mut App) {
         KeyBinding::new("shift-alt-down", AddCursorBelow, Some(CONTEXT)),
         KeyBinding::new("home", MoveHome, Some(CONTEXT)),
         KeyBinding::new("end", MoveEnd, Some(CONTEXT)),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-home", MoveToStart, Some(CONTEXT)),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-end", MoveToEnd, Some(CONTEXT)),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-shift-home", SelectToStart, Some(CONTEXT)),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-shift-end", SelectToEnd, Some(CONTEXT)),
         KeyBinding::new("shift-home", SelectToStartOfLine, Some(CONTEXT)),
         KeyBinding::new("shift-end", SelectToEndOfLine, Some(CONTEXT)),
         #[cfg(target_os = "macos")]
@@ -2749,7 +2757,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         M::clear_inline_completion(self, cx);
 
         self.cursor_line_end_affinity = line_end_affinity;
-        let offset = offset.clamp(0, self.text.len());
+        let offset = self.cursor_boundary(offset, Bias::Left);
         let word_range = self.selected_word_range;
         Self::extend_selection(self.active_selection_mut(), offset, word_range);
 
@@ -2770,12 +2778,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.undo_manager.break_transaction_coalescing();
         M::clear_inline_completion(self, cx);
 
-        let len = self.text.len();
         let new_selections: Vec<CursorSelection> = self
             .selections
             .iter()
             .map(|sel| {
-                let offset = f(self, sel).clamp(0, len);
+                let offset = self.cursor_boundary(f(self, sel), Bias::Left);
                 let mut new_sel = *sel;
                 Self::extend_selection(&mut new_sel, offset, None);
                 new_sel
@@ -2849,25 +2856,31 @@ impl<M: InputModeKind> InputBaseState<M> {
         offset
     }
 
-    pub(super) fn previous_boundary(&self, offset: usize) -> usize {
-        let mut offset = self.text.clip_offset(offset.saturating_sub(1), Bias::Left);
-        if let Some(ch) = self.text.char_at(offset) {
-            if ch == '\r' {
-                offset -= 1;
+    /// Clip a cursor/selection offset without splitting a CRLF newline. This does
+    /// not alter the rope or its byte/UTF-16 conversion used for exact source APIs.
+    pub(super) fn cursor_boundary(&self, offset: usize, bias: Bias) -> usize {
+        let offset = self.text.clip_offset(offset, bias);
+        if offset > 0
+            && self.text.char_at(offset - 1) == Some('\r')
+            && self.text.char_at(offset) == Some('\n')
+        {
+            if bias == Bias::Left {
+                offset - 1
+            } else {
+                offset + 1
             }
+        } else {
+            offset
         }
+    }
 
+    pub(super) fn previous_boundary(&self, offset: usize) -> usize {
+        let offset = self.cursor_boundary(offset.saturating_sub(1), Bias::Left);
         self.clamp_offset_to_visible_backward(offset)
     }
 
     pub(super) fn next_boundary(&self, offset: usize) -> usize {
-        let mut offset = self.text.clip_offset(offset + 1, Bias::Right);
-        if let Some(ch) = self.text.char_at(offset) {
-            if ch == '\r' {
-                offset += 1;
-            }
-        }
-
+        let offset = self.cursor_boundary(offset.saturating_add(1), Bias::Right);
         self.clamp_offset_to_visible_forward(offset)
     }
 
@@ -4073,6 +4086,45 @@ mod tests {
                 );
                 assert_eq!(state.document_revision(), 4);
             });
+        });
+    }
+
+    #[gpui::test]
+    fn textarea_cursor_treats_crlf_as_one_newline(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let view = InputView::build_textarea(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                for original in ["\r\nlast", "\u{feff}first\r\nlast\n", "first\nlast\r\n"] {
+                    state.set_value(original, window, cx);
+                    let newline = original.find('\n').unwrap();
+                    let end = if original.as_bytes()[newline.saturating_sub(1)] == b'\r' {
+                        newline - 1
+                    } else {
+                        newline
+                    };
+                    state.end(&MoveEnd, window, cx);
+                    assert_eq!(state.cursor(), end);
+                    state.right(&MoveRight, window, cx);
+                    assert_eq!(state.cursor(), newline + 1);
+                    state.left(&MoveLeft, window, cx);
+                    assert_eq!(state.cursor(), end);
+                    state.select_to_end_of_line(&SelectToEndOfLine, window, cx);
+                    assert_eq!(state.selected_range(), end..end);
+                    state.move_to_end(&MoveToEnd, window, cx);
+                    assert_eq!(state.cursor(), original.len());
+                    state.move_to_start(&MoveToStart, window, cx);
+                    assert_eq!(state.cursor(), 0);
+                    assert_eq!(state.value().as_bytes(), original.as_bytes());
+                }
+                // A lone CR is an ordinary character; it must not skip its neighbour.
+                state.set_value("a\rb", window, cx);
+                state.right(&MoveRight, window, cx);
+                assert_eq!(state.cursor(), 1);
+                state.right(&MoveRight, window, cx);
+                assert_eq!(state.cursor(), 2);
+            })
         });
     }
 
