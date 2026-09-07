@@ -11,6 +11,9 @@ rather than project-progress logs.
 - [GPUI Shell](gpui-shell.md) explains the scriptable application runtime built
   on `gpui-base`: the engine seam, the render protocol, call scopes, the object
   model, capabilities and the sandbox, and the measured performance model.
+- [Upstream Sync](upstream-sync.md) explains how this CE fork absorbs new
+  `gpui-component` `main` work: why a plain merge fails, the cherry-pick
+  workflow, and the fork conflict-handling conventions.
 
 For component-level APIs and runnable examples, see the
 [gpui-base documentation](../website/base/index.md).
