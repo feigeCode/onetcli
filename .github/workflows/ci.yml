@@ -141,6 +141,10 @@ jobs:
           key: component-shell-cargo-x86_64-linux-gnu-${{ hashFiles('**/Cargo.lock') }}
       - name: Test component bindings
         run: cargo test -p gpui-component-shell --all-targets
+      - name: Verify generated TypeScript contracts
+        run: |
+          npm --prefix crates/component-shell/tests/types ci
+          npm --prefix crates/component-shell/tests/types test
       - name: Lint component bindings
         run: cargo clippy -p gpui-component-shell --all-targets -- -D warnings
       # The inventory test proves every public component is registered or

@@ -12,8 +12,8 @@ Build fantastic, high-performance desktop apps with Rust and [GPUI](https://gpui
 
 GPUI Component is a comprehensive Rust desktop application framework. It
 combines a production-ready UI system with application-grade data, layout, and
-editing capabilities, all built on a reusable foundation of behavior, state,
-and infrastructure.
+editing capabilities and JavaScript extension support, all built on a reusable
+foundation of behavior, state, and infrastructure.
 
 ## Features
 
