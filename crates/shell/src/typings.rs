@@ -181,7 +181,34 @@ fn base_declarations() -> String {
     declarations()
 }
 
+/// Names every `Element` owns, so a component method that re-declares one
+/// (`size`) can be emitted as an overload instead of an `Omit`+replacement
+/// that breaks assignability.
+///
+/// Derived from the same `ELEMENT_METHODS` text the declaration is built
+/// from, plus the style names `style::known_names` contributes, so a method
+/// added upstream is known here the moment it is declared there.
+fn element_method_names() -> Vec<String> {
+    let mut names: Vec<String> = ELEMENT_METHODS
+        .lines()
+        .filter(|line| line.starts_with("    "))
+        .filter_map(|line| {
+            let rest = line.trim_start();
+            let end = rest.find(['(', '<']).unwrap_or(rest.len());
+            let name = &rest[..end];
+            (!name.is_empty()
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte == b'_' || byte.is_ascii_digit()))
+            .then(|| name.to_string())
+        })
+        .collect();
+    names.extend(style::known_names().into_iter().map(String::from));
+    names
+}
+
 pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRegistry) -> String {
+    let element_method_names = element_method_names();
     let (nullary, parametric) = style_methods();
 
     let mut out = String::with_capacity(160 * 1024);
@@ -254,9 +281,24 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
             .copied()
             .filter(|behavior| !declared.contains(behavior))
             .collect::<Vec<_>>();
+        // A method the descriptor re-declares under a name `Element` already
+        // owns (`size` is the live case: an element sizes itself in Length, a
+        // component in xsmall…large) is emitted as an overload alongside the
+        // inherited one rather than omitted: `Omit` + a narrower replacement
+        // leaves the cross assignable to `Element` only by TS's good graces,
+        // and when the graces run out — `size(enum): ButtonElement` vs
+        // `size(Length): Element` — a component element stops being accepted
+        // where an `Element` is, which the runtime never refuses.
+        let overloaded = declared
+            .iter()
+            .copied()
+            .filter(|name| element_method_names.iter().any(|owned| owned == name))
+            .map(|name| name.to_string())
+            .collect::<Vec<_>>();
         let removed = declared
             .iter()
             .copied()
+            .filter(|name| !overloaded.iter().any(|owned| owned == name))
             .chain(withheld.iter().copied())
             .collect::<Vec<_>>();
         if removed.is_empty() {
