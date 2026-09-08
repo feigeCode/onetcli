@@ -5600,6 +5600,107 @@ mod tests {
         });
     }
 
+    #[gpui::test]
+    fn test_ime_editor_replaces_preedit_and_starts_fresh_after_commit(cx: &mut TestAppContext) {
+        let input_view =
+            InputView::build_editor(cx, |state| state.default_value("-- 😀\nSELECT ;"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+
+        cx.update(|window, cx| {
+            input_view.input.update(cx, |state, cx| {
+                let prefix = "-- 😀\nSELECT ";
+                let start = prefix.len();
+                let start_utf16 = prefix.encode_utf16().count();
+                state.set_selected_range(start..start, cx);
+
+                // None is the platform contract for an NSNotFound replacement
+                // range. Each preedit must replace the previous marked text.
+                state.replace_and_mark_text_in_range(None, "s", Some(1..1), window, cx);
+                assert_eq!(state.value(), format!("{prefix}s;"));
+                assert_eq!(
+                    state.marked_text_range(window, cx),
+                    Some(start_utf16..start_utf16 + 1)
+                );
+
+                state.replace_and_mark_text_in_range(None, "se", Some(2..2), window, cx);
+                assert_eq!(state.value(), format!("{prefix}se;"));
+                assert_eq!(
+                    state.marked_text_range(window, cx),
+                    Some(start_utf16..start_utf16 + 2)
+                );
+                assert_eq!(state.selected_range(), start + 2..start + 2);
+
+                state.replace_text_in_range(None, "今天", window, cx);
+                assert_eq!(state.value(), format!("{prefix}今天;"));
+                assert_eq!(state.marked_text_range(window, cx), None);
+                let committed_end = start + "今天".len();
+                assert_eq!(state.selected_range(), committed_end..committed_end);
+
+                // insertText may end the composition without an unmarkText.
+                // The next composition must start at the new caret, not reuse
+                // the first composition's marked range.
+                state.replace_and_mark_text_in_range(None, "n", Some(1..1), window, cx);
+                state.replace_and_mark_text_in_range(None, "ni", Some(2..2), window, cx);
+                assert_eq!(state.value(), format!("{prefix}今天ni;"));
+                assert_eq!(
+                    state.marked_text_range(window, cx),
+                    Some(start_utf16 + 2..start_utf16 + 4)
+                );
+                state.replace_text_in_range(None, "你", window, cx);
+                assert_eq!(state.value(), format!("{prefix}今天你;"));
+                assert_eq!(state.marked_text_range(window, cx), None);
+
+                state.replace_text_in_range(None, "e", window, cx);
+                assert_eq!(state.value(), format!("{prefix}今天你e;"));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn test_ime_editor_mixed_mark_commit_and_cancel_do_not_duplicate(cx: &mut TestAppContext) {
+        let input_view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+
+        cx.update(|window, cx| {
+            input_view.input.update(cx, |state, cx| {
+                state.replace_and_mark_text_in_range(None, "s", Some(1..1), window, cx);
+                state.replace_and_mark_text_in_range(None, "se", Some(2..2), window, cx);
+                // Confirming the raw Latin preedit must not append another copy.
+                state.replace_text_in_range(None, "se", window, cx);
+                state.unmark_text(window, cx);
+                assert_eq!(state.value(), "se");
+                assert_eq!(state.marked_text_range(window, cx), None);
+
+                state.replace_and_mark_text_in_range(None, "n", Some(1..1), window, cx);
+                state.replace_and_mark_text_in_range(None, "", Some(0..0), window, cx);
+                assert_eq!(state.value(), "se");
+                assert_eq!(state.marked_text_range(window, cx), None);
+                state.replace_text_in_range(None, "!", window, cx);
+                assert_eq!(state.value(), "se!");
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn test_ime_editor_explicit_replacement_range_takes_precedence(cx: &mut TestAppContext) {
+        let input_view = InputView::build_editor(cx, |state| state.default_value("ab"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+
+        cx.update(|window, cx| {
+            input_view.input.update(cx, |state, cx| {
+                state.replace_and_mark_text_in_range(Some(0..1), "s", Some(1..1), window, cx);
+                assert_eq!(state.value(), "sb");
+                // An explicit platform range must not be ignored in favor of
+                // the old marked range (0..1).
+                state.replace_and_mark_text_in_range(Some(0..2), "se", Some(2..2), window, cx);
+                assert_eq!(state.value(), "se");
+                state.replace_text_in_range(Some(0..2), "今天", window, cx);
+                assert_eq!(state.value(), "今天");
+                assert_eq!(state.marked_text_range(window, cx), None);
+            });
+        });
+    }
+
     /// An IME composition (marking then commit) undoes as a single unit.
     #[gpui::test]
     fn test_ime_composition_undoes_as_one_unit(cx: &mut TestAppContext) {

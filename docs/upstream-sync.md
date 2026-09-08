@@ -126,14 +126,17 @@ four production crates above are the green bar.
 When a sync finishes, update the **baseline** below so the next run starts
 from the right point, and record any commit you deliberately left out.
 
-- Last synced upstream: `main` tip `cbdf5baa` (`input: Multi cursors`).
-  Applied via cherry-pick (2026-09): #2904 #2908 #2909 #2910 #2920 #2922
-  #2923 #2928 #2931 #2954 #2956 #2957 #2971 #2973 #2974 #2975 #2980 #2984,
-  plus one reconciliation commit. Skipped: rebrand/packaging (#2927 #2929
-  #2936 #2937 #2940 #2963 #2966 #2982 #2985 and the gpui-pre/CI series),
-  website/docs/skills series, and the land/revert fps pair #2915/#2916.
-  Commits already present in the fork from an earlier sync were skipped as
-  empty (#2906 #2911 #2912 #2913 #2918 #2919 #2921 #2938 #2939 #2941 #2944
-  #2945 #2946 #2947 #2952 #2953 #2955 #2969 #2837 and more).
+- Last synced upstream: `main` tip `7f39c074` (`chore: improve component
+  conventions for AI-assisted development`). Applied via cherry-pick
+  (2026-09): #2837 (multi cursors), #2986 (CRLF cursor boundaries), #2987
+  (column selection width), #2993 (component conventions, adapted without the
+  gpui-kit packaging-only files), and #2996 (calendar accessibility). Skipped:
+  #2992 (CI metadata parse). Note: the previous
+  baseline wrongly listed #2837 as "already present" — it was not in the
+  fork; this sync ported it as the foundation for #2986/#2987.
+- GPUI baseline: `1f6e697c` (`fix(macos): use Foundation NSNotFound for IME
+  ranges`). Editor IME regression tests cover replacing an active preedit,
+  committing raw Latin text without duplication, and starting a new
+  composition after commit.
 - Deferred decisions: adopt upstream packaging wholesale (drops CE identity,
   makes future syncs nearly free) vs keep CE packaging (this document).

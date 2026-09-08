@@ -140,7 +140,7 @@ impl SettingPage {
             .use_keyed_state(
                 SharedString::from(format!("list-state:{}", ix)),
                 cx,
-                |_, _| ListState::new(groups_count, ListAlignment::Top, px(100.)),
+                |_, _| ListState::new(groups_count, ListAlignment::Top, px(100.)).measure_all(),
             )
             .read(cx)
             .clone();
