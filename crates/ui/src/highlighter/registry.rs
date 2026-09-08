@@ -10,6 +10,8 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
+use anyhow::Result;
+
 use crate::{
     ActiveTheme, DEFAULT_THEME_COLORS, ThemeMode,
     highlighter::{Language, languages},
@@ -590,7 +592,11 @@ impl gpui_base::input::HighlightStyleResolver for HighlightTheme {
 /// Registry for code highlighter languages.
 pub struct LanguageRegistry {
     languages: Mutex<HashMap<SharedString, LanguageConfig>>,
+    parser_factories: Mutex<HashMap<SharedString, LanguageParserFactory>>,
 }
+
+pub type LanguageParserFactory =
+    Arc<dyn Fn() -> Result<(tree_sitter::Parser, tree_sitter::Language)> + Send + Sync>;
 
 impl LanguageRegistry {
     /// Returns the singleton instance of the `LanguageRegistry` with default languages and themes.
@@ -601,6 +607,7 @@ impl LanguageRegistry {
                     .map(|language| (language.name().into(), language.config()))
                     .collect(),
             ),
+            parser_factories: Mutex::new(HashMap::new()),
         });
         &INSTANCE
     }
@@ -611,6 +618,37 @@ impl LanguageRegistry {
             .lock()
             .unwrap()
             .insert(lang.to_string().into(), config.clone());
+    }
+
+    /// Registers a parser factory for a dynamically loaded language.
+    pub fn register_parser_factory(&self, lang: &str, factory: LanguageParserFactory) {
+        self.parser_factories
+            .lock()
+            .unwrap()
+            .insert(lang.to_string().into(), factory);
+    }
+
+    pub(crate) fn parser(
+        &self,
+        name: &str,
+    ) -> Result<(tree_sitter::Parser, tree_sitter::Language)> {
+        let config = self
+            .language(name)
+            .ok_or_else(|| anyhow::anyhow!("language {name:?} is not registered"))?;
+        if let Some(factory) = self
+            .parser_factories
+            .lock()
+            .unwrap()
+            .get(&config.name)
+            .cloned()
+        {
+            return factory();
+        }
+
+        let language = config
+            .language
+            .ok_or_else(|| anyhow::anyhow!("language {name:?} has no grammar"))?;
+        Ok((tree_sitter::Parser::new(), language))
     }
 
     /// Returns a list of all registered language names.
@@ -631,6 +669,11 @@ impl LanguageRegistry {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
     use crate::highlighter::LanguageConfig;
 
     #[test]
@@ -669,5 +712,39 @@ mod tests {
             assert!(registry.language("javascript").is_none());
             assert!(registry.language("js").is_none());
         }
+    }
+
+    #[test]
+    fn dynamic_language_uses_registered_parser_factory() {
+        use super::LanguageRegistry;
+
+        let registry = LanguageRegistry::singleton();
+        let called = Arc::new(AtomicBool::new(false));
+        registry.register(
+            "__dynamic_json__",
+            &LanguageConfig::new(
+                "__dynamic_json__",
+                tree_sitter_json::LANGUAGE.into(),
+                vec![],
+                "",
+                "",
+                "",
+            ),
+        );
+        registry.register_parser_factory("__dynamic_json__", {
+            let called = called.clone();
+            Arc::new(move || {
+                called.store(true, Ordering::Relaxed);
+                Ok((
+                    tree_sitter::Parser::new(),
+                    tree_sitter_json::LANGUAGE.into(),
+                ))
+            })
+        });
+
+        let (_, language) = registry.parser("__dynamic_json__").unwrap();
+
+        assert!(called.load(Ordering::Relaxed));
+        assert_eq!(language, tree_sitter_json::LANGUAGE.into());
     }
 }
