@@ -140,4 +140,4 @@ required-features = ["test-support", "component"]
 
 [[test]]
 name = "search"
-required-features = ["test-support", "component"]
+required-features = ["assets", "test-support", "component"]
