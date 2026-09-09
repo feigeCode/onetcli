@@ -3645,7 +3645,10 @@ impl ShellRuntime {
                     payload.set("secondary", *secondary)?;
                     payload.set("shift", *shift)?;
                 }
-                InputEvent::Change | InputEvent::Focus | InputEvent::Blur => {}
+                InputEvent::Change
+                | InputEvent::Focus
+                | InputEvent::Blur
+                | InputEvent::GutterMarkerMouseDown { .. } => {}
             }
             handler.call::<_, ()>((
                 payload,
