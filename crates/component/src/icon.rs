@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use crate::{ActiveTheme, Sizable, Size};
 use gpui::{
-    AnyElement, App, AppContext, Context, Entity, Hsla, IntoElement, Pixels, Radians, Render,
-    RenderOnce, SharedString, StyleRefinement, Styled, Svg, Transformation, Window,
-    prelude::FluentBuilder as _, svg,
+    AnyElement, App, AppContext, Context, Div, Entity, Hsla, IntoElement, ParentElement, Pixels,
+    Radians, Render, RenderOnce, SharedString, StyleRefinement, Styled, Svg, Transformation, Window,
+    div, img, prelude::FluentBuilder as _, svg,
 };
-pub use gpui_kit_assets::IconNamed;
+pub use gpui_kit_assets::{IconColorMode, IconNamed};
 
 // Preserve the original enum (including exhaustive matches and inherent view)
 // while the complete, shared catalog is owned by gpui-kit-assets.
@@ -87,6 +87,7 @@ pub struct Icon {
     text_color: Option<Hsla>,
     size: Option<Size>,
     transformation: Option<Transformation>,
+    color_mode: IconColorMode,
 }
 
 impl Default for Icon {
@@ -97,6 +98,7 @@ impl Default for Icon {
             text_color: None,
             size: None,
             transformation: None,
+            color_mode: IconColorMode::Mono,
         }
     }
 }
@@ -107,7 +109,8 @@ impl Icon {
     }
 
     fn build(name: impl IconNamed) -> Self {
-        Self::default().path(name.path())
+        let color_mode = name.color_mode();
+        Self::default().path(name.path()).color_mode(color_mode)
     }
 
     /// Set the icon path of the Assets bundle
@@ -158,6 +161,24 @@ impl Icon {
         Self::default()
     }
 
+    /// Set the icon's rendering mode explicitly.
+    pub fn color_mode(mut self, mode: IconColorMode) -> Self {
+        self.color_mode = mode;
+        self
+    }
+
+    /// Render the icon with its intrinsic colors (e.g. brand or product marks).
+    pub fn color(mut self) -> Self {
+        self.color_mode = IconColorMode::Color;
+        self
+    }
+
+    /// Render the icon tinted by the ambient text color (the default).
+    pub fn mono(mut self) -> Self {
+        self.color_mode = IconColorMode::Mono;
+        self
+    }
+
     /// Rotate the icon by the given angle
     ///
     /// Replaces any previous transformation or rotation.
@@ -193,6 +214,33 @@ impl Icon {
                 this.with_transformation(transformation)
             })
     }
+
+    fn into_color_element(self, text_size: Pixels) -> Div {
+        let has_base_size = self.style.size.width.is_some() || self.style.size.height.is_some();
+
+        div()
+            .map(|mut this| {
+                *this.style() = self.style;
+                this
+            })
+            .flex_shrink_0()
+            .when(!has_base_size, |this| this.size(text_size))
+            .when_some(self.size, |this, size| match size {
+                Size::Size(px) => this.size(px),
+                Size::XSmall => this.size_3(),
+                Size::Small => this.size_3p5(),
+                Size::Medium => this.size_4(),
+                Size::Large => this.size_6(),
+            })
+            .child(color_icon_content(&self.source))
+    }
+}
+
+fn color_icon_content(source: &IconSource) -> AnyElement {
+    match source {
+        IconSource::Path(path) => img(path.clone()).size_full().into_any_element(),
+        IconSource::Data(data) => svg().data(data).size_full().into_any_element(),
+    }
 }
 
 impl Styled for Icon {
@@ -216,7 +264,12 @@ impl Sizable for Icon {
 impl RenderOnce for Icon {
     fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let text_size = window.text_style().font_size.to_pixels(window.rem_size());
-        self.into_svg(text_size, window.text_style().color)
+        match self.color_mode {
+            IconColorMode::Mono => self
+                .into_svg(text_size, window.text_style().color)
+                .into_any_element(),
+            IconColorMode::Color => self.into_color_element(text_size).into_any_element(),
+        }
     }
 }
 
@@ -229,7 +282,13 @@ impl From<Icon> for AnyElement {
 impl Render for Icon {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let text_size = window.text_style().font_size.to_pixels(window.rem_size());
-        self.clone().into_svg(text_size, cx.theme().foreground)
+        match self.color_mode {
+            IconColorMode::Mono => self
+                .clone()
+                .into_svg(text_size, cx.theme().foreground)
+                .into_any_element(),
+            IconColorMode::Color => self.clone().into_color_element(text_size).into_any_element(),
+        }
     }
 }
 

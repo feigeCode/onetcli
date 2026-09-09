@@ -5,7 +5,7 @@
 //! catalog. Applications can provide their own source for additional icons.
 
 mod icon;
-pub use icon::{IconName, IconNamed};
+pub use icon::{IconColorMode, IconName, IconNamed};
 
 /// Embed application assets for GPUI Component.
 ///
