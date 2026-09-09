@@ -115,7 +115,7 @@ pub use runtime::{
     ExitHandler, ExitRequest, clear_exit_handler, failure_surface, on_exit_request,
     resolve_app_root,
 };
-pub use scope::{ScopePhase, with_current_app};
+pub use scope::{ScopePhase, with_current, with_current_app};
 pub use snapshot::RenderSnapshot;
 pub use view::ScriptView;
 pub use watch::Watcher;
